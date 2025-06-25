@@ -100,38 +100,23 @@ def calculate_win_probability(hand_class, num_opponents=1):
     
     return win_prob
 
-def generate_explanation(hand_class, cards, skill_level="beginner"):
+def generate_explanation(hand_class, cards):
     """Generate educational explanation"""
     hand_name = HAND_NAMES[hand_class]
     card_str = " ".join([f"{RANKS_NUM[rank]}{SUITS_NUM[suit]}" for suit, rank in cards])
     
-    if skill_level == "beginner":
-        explanations = {
-            0: f"🃏 **{hand_name}**: You have no pairs. Your highest card matters most.",
-            1: f"👥 **{hand_name}**: Two cards of the same rank! Better than high card.",
-            2: f"👥👥 **{hand_name}**: Two different pairs! A decent hand.",
-            3: f"🎯 **{hand_name}**: Three cards of the same rank! Strong hand.",
-            4: f"📈 **{hand_name}**: Five consecutive cards! Very strong.",
-            5: f"🌈 **{hand_name}**: Five cards same suit! Strong hand.",
-            6: f"🏠 **{hand_name}**: Three of a kind + pair! Excellent!",
-            7: f"🔥 **{hand_name}**: Four same rank! Almost unbeatable!",
-            8: f"💎 **{hand_name}**: Straight + flush! Nearly unbeatable!",
-            9: f"👑 **{hand_name}**: Best possible hand! You cannot lose!"
-        }
-    else:  # Intermediate/Advanced
-        strength = HAND_STRENGTH[hand_class]
-        explanations = {
-            0: f"📊 **{hand_name}** ({card_str}): {strength:.0%} strength. Play tight.",
-            1: f"📊 **{hand_name}** ({card_str}): {strength:.0%} strength. Value vs weak hands.",
-            2: f"📊 **{hand_name}** ({card_str}): {strength:.0%} strength. Good for value betting.",
-            3: f"📊 **{hand_name}** ({card_str}): {strength:.0%} strength. Strong - bet for value.",
-            4: f"📊 **{hand_name}** ({card_str}): {strength:.0%} strength. Very strong hand.",
-            5: f"📊 **{hand_name}** ({card_str}): {strength:.0%} strength. Premium hand.",
-            6: f"📊 **{hand_name}** ({card_str}): {strength:.0%} strength. Excellent hand.",
-            7: f"📊 **{hand_name}** ({card_str}): {strength:.0%} strength. Monster hand.",
-            8: f"📊 **{hand_name}** ({card_str}): {strength:.0%} strength. Nearly nuts.",
-            9: f"📊 **{hand_name}** ({card_str}): {strength:.0%} strength. Absolute nuts."
-        }
+    explanations = {
+        0: f"🃏 **{hand_name}**: You have no pairs. Your highest card matters most.",
+        1: f"👥 **{hand_name}**: Two cards of the same rank! Better than high card.",
+        2: f"👥👥 **{hand_name}**: Two different pairs! A decent hand.",
+        3: f"🎯 **{hand_name}**: Three cards of the same rank! Strong hand.",
+        4: f"📈 **{hand_name}**: Five consecutive cards! Very strong.",
+        5: f"🌈 **{hand_name}**: Five cards same suit! Strong hand.",
+        6: f"🏠 **{hand_name}**: Three of a kind + pair! Excellent!",
+        7: f"🔥 **{hand_name}**: Four same rank! Almost unbeatable!",
+        8: f"💎 **{hand_name}**: Straight + flush! Nearly unbeatable!",
+        9: f"👑 **{hand_name}**: Best possible hand! You cannot lose!"
+    }
     
     return explanations.get(hand_class, "Unknown hand")
 
@@ -248,20 +233,15 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Upload Dataset (CSV)", type=['csv'])
     if uploaded_file and st.button("Load Dataset"):
         if st.session_state.processor.load_dataset(uploaded_file):
-            st.success("Dataset loaded!")
+            st.session_state.processor.train_model()
+            st.success(f"Dataset loaded and model trained! Accuracy: {st.session_state.processor.training_accuracy:.1%}")
     if st.button("Use Demo Dataset"):
         st.session_state.processor.create_demo_dataset()
-        st.success("Demo dataset created!")
-    if st.session_state.processor.dataset is not None and not st.session_state.processor.is_trained:
-        if st.button("Train Model"):
-            if st.session_state.processor.train_model():
-                st.success(f"Model trained! Accuracy: {st.session_state.processor.training_accuracy:.1%}")
-    
+        st.session_state.processor.train_model()
+        st.success(f"Demo dataset created and model trained! Accuracy: {st.session_state.processor.training_accuracy:.1%}")
     st.metric("Hands Analyzed", st.session_state.hands_analyzed)
     accuracy = (st.session_state.correct_predictions / max(1, st.session_state.hands_analyzed)) * 100
     st.metric("Tutorial Accuracy", f"{accuracy:.1f}%")
-    
-    skill_level = st.selectbox("Teaching Level", ["beginner", "intermediate", "advanced"])
     
     if st.button("🔄 Reset Progress"):
         st.session_state.hands_analyzed = 0
@@ -355,7 +335,7 @@ if st.session_state.processor.dataset is not None:
                     else:
                         st.error(f"❌ Wrong. Correct answer: {correct_answer}")
                     
-                    explanation = generate_explanation(st.session_state.quiz_answer, st.session_state.quiz_hand, skill_level)
+                    explanation = generate_explanation(st.session_state.quiz_answer, st.session_state.quiz_hand)
                     st.info(explanation)
         
         elif lesson == "Pot Odds":
@@ -453,7 +433,7 @@ if st.session_state.processor.dataset is not None:
                     st.error(f"❌ Action: Suboptimal. Better choice: {correct_action}")
                 
                 # Show explanations
-                explanation = generate_explanation(scenario['hand_class'], scenario['cards'], skill_level)
+                explanation = generate_explanation(scenario['hand_class'], scenario['cards'])
                 st.info(explanation)
                 
                 action_explanation = generate_action_explanation(optimal_action, hand_strength, pot_odds)
@@ -494,6 +474,19 @@ if st.session_state.processor.dataset is not None:
         
         else:
             st.info("📊 Analyze some hands to see your progress!")
+
+# Footer
+st.markdown("---")
+st.markdown("""
+**🎯 Features:**
+- Real-time hand analysis and classification with ML prediction
+- Interactive tutorial with hand rankings and pot odds calculator
+- Advanced practice mode with dual scoring (hand recognition + action prediction)
+- Progress tracking and learning analytics
+- Dataset upload and demo data generation
+
+*This poker AI combines machine learning with educational tools for comprehensive poker skill development.*
+""")
 
 
 
