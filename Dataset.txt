@@ -1,3 +1,0 @@
-https://www.kaggle.com/datasets/smeilz/poker-holdem-games
-
-https://huggingface.co/datasets/RZ412/PokerBench
