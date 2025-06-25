@@ -243,6 +243,13 @@ with st.sidebar:
     accuracy = (st.session_state.correct_predictions / max(1, st.session_state.hands_analyzed)) * 100
     st.metric("Tutorial Accuracy", f"{accuracy:.1f}%")
     
+    # Model status indicator
+    if st.session_state.processor.is_trained:
+        st.success("✅ Model Ready")
+        st.metric("Model Accuracy", f"{st.session_state.processor.training_accuracy:.1%}")
+    else:
+        st.warning("⚠️ Model Not Trained")
+    
     if st.button("🔄 Reset Progress"):
         st.session_state.hands_analyzed = 0
         st.session_state.correct_predictions = 0
@@ -251,34 +258,52 @@ with st.sidebar:
 
 if st.session_state.processor.dataset is not None:
     tabs = st.tabs(["Analyzer", "Dataset", "Tutorial", "Practice", "Analytics"])
+else:
+    st.info("👈 **Get Started**: Use the sidebar to load a dataset or create a demo dataset to begin!")
+    st.write("**Available Features:**")
+    st.write("• 🎮 **Hand Analyzer**: Predict win probabilities using machine learning")
+    st.write("• 📊 **Dataset View**: Explore poker hand data and statistics") 
+    st.write("• 📚 **Tutorial**: Learn poker hand rankings and pot odds")
+    st.write("• 🎲 **Practice**: Test your skills with interactive scenarios")
+    st.write("• 📈 **Analytics**: Track your learning progress")
+
+if st.session_state.processor.dataset is not None:
+    tabs = st.tabs(["Analyzer", "Dataset", "Tutorial", "Practice", "Analytics"])
 
     with tabs[0]:
         st.header("Analyze Poker Hand")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("Hole Cards:")
-            hole1_suit = st.selectbox("Hole Card 1 Suit", options=list(SUITS.keys()), format_func=lambda s: SUITS[s], key="hole1_suit")
-            hole1_rank = st.selectbox("Hole Card 1 Rank", options=list(RANKS.keys()), format_func=lambda r: RANKS[r], key="hole1_rank")
-            hole2_suit = st.selectbox("Hole Card 2 Suit", options=list(SUITS.keys()), format_func=lambda s: SUITS[s], key="hole2_suit")
-            hole2_rank = st.selectbox("Hole Card 2 Rank", options=list(RANKS.keys()), format_func=lambda r: RANKS[r], key="hole2_rank")
-            hole1 = f"{hole1_rank}{hole1_suit}"
-            hole2 = f"{hole2_rank}{hole2_suit}"
-            st.write("Board Cards:")
-            board = []
-            for i in range(5):
-                suit = st.selectbox(f"Board Card {i+1} Suit", options=list(SUITS.keys()), format_func=lambda s: SUITS[s], key=f"board_suit_{i}")
-                rank = st.selectbox(f"Board Card {i+1} Rank", options=list(RANKS.keys()), format_func=lambda r: RANKS[r], key=f"board_rank_{i}")
-                board.append(f"{rank}{suit}")
-            if st.button("Analyze Hand"):
-                win_prob = st.session_state.processor.predict([hole1, hole2], board)
-                st.session_state.result = (hole1, hole2, board, win_prob)
-        if 'result' in st.session_state:
-            hole1, hole2, board, win_prob = st.session_state.result
-            st.write(f"Your Hand: {parse_card(hole1)} {parse_card(hole2)}")
-            st.write(f"Board: {' '.join([parse_card(c) for c in board if c])}")
-            st.metric("Win Probability", f"{win_prob:.1%}")
-            st.progress(win_prob, text=f"{win_prob:.1%}")
-            st.session_state.hands_analyzed += 1
+        
+        if not st.session_state.processor.is_trained:
+            st.warning("⚠️ Model not trained yet! Please load a dataset or use demo dataset first.")
+            st.info("👈 Use the sidebar to either upload a CSV file or click 'Use Demo Dataset' to start analyzing hands.")
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("Hole Cards:")
+                hole1_suit = st.selectbox("Hole Card 1 Suit", options=list(SUITS.keys()), format_func=lambda s: SUITS[s], key="hole1_suit")
+                hole1_rank = st.selectbox("Hole Card 1 Rank", options=list(RANKS.keys()), format_func=lambda r: RANKS[r], key="hole1_rank")
+                hole2_suit = st.selectbox("Hole Card 2 Suit", options=list(SUITS.keys()), format_func=lambda s: SUITS[s], key="hole2_suit")
+                hole2_rank = st.selectbox("Hole Card 2 Rank", options=list(RANKS.keys()), format_func=lambda r: RANKS[r], key="hole2_rank")
+                hole1 = f"{hole1_rank}{hole1_suit}"
+                hole2 = f"{hole2_rank}{hole2_suit}"
+                st.write("Board Cards:")
+                board = []
+                for i in range(5):
+                    suit = st.selectbox(f"Board Card {i+1} Suit", options=list(SUITS.keys()), format_func=lambda s: SUITS[s], key=f"board_suit_{i}")
+                    rank = st.selectbox(f"Board Card {i+1} Rank", options=list(RANKS.keys()), format_func=lambda r: RANKS[r], key=f"board_rank_{i}")
+                    board.append(f"{rank}{suit}")
+                if st.button("Analyze Hand"):
+                    win_prob = st.session_state.processor.predict([hole1, hole2], board)
+                    st.session_state.result = (hole1, hole2, board, win_prob)
+            
+            with col2:
+                if 'result' in st.session_state:
+                    hole1, hole2, board, win_prob = st.session_state.result
+                    st.write(f"Your Hand: {parse_card(hole1)} {parse_card(hole2)}")
+                    st.write(f"Board: {' '.join([parse_card(c) for c in board if c])}")
+                    st.metric("Win Probability", f"{win_prob:.1%}")
+                    st.progress(win_prob, text=f"{win_prob:.1%}")
+                    st.session_state.hands_analyzed += 1
 
     with tabs[1]:
         st.header("Dataset Overview")
