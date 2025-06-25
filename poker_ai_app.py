@@ -8,7 +8,7 @@ from datetime import datetime
 
 # Set page config
 st.set_page_config(
-    page_title="Poker AI Full Tutorial & Predictor",
+    page_title="Poker AI Tutorial & Predictor",
     page_icon="🃏",
     layout="wide"
 )
@@ -141,10 +141,60 @@ class RealPokerDataProcessor:
 
     def load_dataset(self, uploaded_file):
         try:
-            self.dataset = pd.read_csv(uploaded_file)
+            # Get file extension
+            file_name = uploaded_file.name
+            file_extension = file_name.split('.')[-1].lower()
+            
+            # Load based on file type
+            if file_extension == 'csv':
+                self.dataset = pd.read_csv(uploaded_file)
+            elif file_extension == 'txt':
+                # Try different delimiters for txt files
+                delimiters = ['\t', ',', ' ', '|', ';']
+                loaded = False
+                
+                for delimiter in delimiters:
+                    try:
+                        uploaded_file.seek(0)  # Reset file pointer
+                        self.dataset = pd.read_csv(uploaded_file, delimiter=delimiter)
+                        # Check if we got reasonable columns (more than 1 column)
+                        if len(self.dataset.columns) > 1:
+                            loaded = True
+                            st.info(f"✅ Detected delimiter: '{delimiter}'")
+                            break
+                    except:
+                        continue
+                
+                if not loaded:
+                    uploaded_file.seek(0)
+                    # Fallback: try as comma-separated
+                    self.dataset = pd.read_csv(uploaded_file, delimiter=',')
+            else:
+                st.error(f"Unsupported file type: {file_extension}")
+                return False
+            
+            # Check for required columns
+            required_columns = ['hole_card_1', 'hole_card_2', 'board_card_1', 'board_card_2', 
+                              'board_card_3', 'board_card_4', 'board_card_5', 'strength']
+            missing_columns = [col for col in required_columns if col not in self.dataset.columns]
+            
+            if missing_columns:
+                st.error(f"❌ Missing required columns: {missing_columns}")
+                st.write("**Expected columns:**")
+                for col in required_columns:
+                    st.write(f"• `{col}`")
+                st.write("**Your file has these columns:**")
+                for col in self.dataset.columns:
+                    st.write(f"• `{col}`")
+                st.info("💡 **Tip**: Use 'Use Demo Dataset' to see the expected format, or ensure your file has the correct column names.")
+                return False
+            
+            st.success(f"📁 Successfully loaded {file_extension.upper()} file with {len(self.dataset)} rows")
             return True
+            
         except Exception as e:
             st.error(f"Error loading dataset: {e}")
+            st.info("💡 **Try**: Make sure your file is properly formatted with the correct columns and delimiters")
             return False
 
     def create_demo_dataset(self, n_samples=1000):
@@ -152,7 +202,13 @@ class RealPokerDataProcessor:
         for _ in range(n_samples):
             hole_cards = self._generate_random_cards(2)
             board_cards = self._generate_random_cards(5, exclude=hole_cards)
-            hand_strength = self._evaluate_hand_strength(hole_cards + board_cards)
+            all_cards = hole_cards + board_cards
+            
+            # Convert to numerical format for proper hand evaluation
+            cards_numeric = [(self._suit_to_num(c[1]), self._rank_to_num(c[0])) for c in all_cards]
+            hand_class = evaluate_poker_hand(cards_numeric[-5:])  # Use last 5 cards
+            hand_strength = HAND_STRENGTH[hand_class] * 100  # Convert to 0-100 scale
+            
             row = {
                 'hole_card_1': hole_cards[0], 'hole_card_2': hole_cards[1],
                 'board_card_1': board_cards[0], 'board_card_2': board_cards[1], 'board_card_3': board_cards[2],
@@ -161,6 +217,12 @@ class RealPokerDataProcessor:
             demo_data.append(row)
         self.dataset = pd.DataFrame(demo_data)
         return True
+    
+    def _suit_to_num(self, suit):
+        return {'S': 1, 'H': 2, 'D': 3, 'C': 4}[suit]
+    
+    def _rank_to_num(self, rank):
+        return {'A': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, 'T': 10, 'J': 11, 'Q': 12, 'K': 13}[rank]
 
     def _generate_random_cards(self, n_cards, exclude=None):
         if exclude is None: exclude = []
@@ -184,36 +246,97 @@ class RealPokerDataProcessor:
         rank_map = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10, '9': 9, '8': 8, '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
         suit_map = {'S': 1, 'H': 2, 'D': 3, 'C': 4}
         features, targets = [], []
+        
         for _, row in self.dataset.iterrows():
             hole = [row['hole_card_1'], row['hole_card_2']]
             board = [row[f'board_card_{i}'] for i in range(1, 6)]
             cards = hole + board
+            
+            # Basic features: rank and suit
             feature = []
             for c in cards:
                 feature.extend([rank_map[c[0]], suit_map[c[1]]])
+            
+            # Enhanced poker features
+            ranks = [rank_map[c[0]] for c in cards]
+            suits = [suit_map[c[1]] for c in cards]
+            
+            # Add poker-specific features
+            rank_counts = [ranks.count(r) for r in set(ranks)]
+            suit_counts = [suits.count(s) for s in set(suits)]
+            
+            # Feature engineering
+            feature.extend([
+                max(rank_counts),  # Highest pair/trips/quads
+                len([c for c in rank_counts if c >= 2]),  # Number of pairs
+                max(suit_counts),  # Flush potential
+                max(ranks),  # Highest card
+                min(ranks),  # Lowest card
+                len(set(ranks)),  # Number of unique ranks
+            ])
+            
             features.append(feature)
             targets.append(row['strength'] / 100)
+            
         return np.array(features), np.array(targets)
 
     def train_model(self):
-        X, y = self.prepare_features()
-        if len(X) == 0: return False
-        X_bias = np.column_stack([np.ones(len(X)), X])
-        self.model = np.linalg.lstsq(X_bias, y, rcond=None)[0]
-        preds = np.clip(X_bias @ self.model, 0, 1)
-        self.training_accuracy = 1 - np.sum((y - preds)**2) / np.sum((y - y.mean())**2)
-        self.is_trained = True
-        return True
+        try:
+            X, y = self.prepare_features()
+            if len(X) == 0: 
+                st.error("No valid data found for training.")
+                return False
+            X_bias = np.column_stack([np.ones(len(X)), X])
+            self.model = np.linalg.lstsq(X_bias, y, rcond=None)[0]
+            preds = np.clip(X_bias @ self.model, 0, 1)
+            self.training_accuracy = 1 - np.sum((y - preds)**2) / np.sum((y - y.mean())**2)
+            self.is_trained = True
+            return True
+        except Exception as e:
+            st.error(f"Error training model: {e}")
+            return False
 
     def predict(self, hole, board):
-        if not self.is_trained: return 0.5
+        if not self.is_trained: 
+            return 0.5
+        
         rank_map = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10, '9': 9, '8': 8, '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
         suit_map = {'S': 1, 'H': 2, 'D': 3, 'C': 4}
+        
         cards = hole + board
+        
+        # Basic features: rank and suit for each card
         features = []
         for c in cards:
             features.extend([rank_map.get(c[0], 2), suit_map.get(c[1], 1)])
+        
+        # Enhanced poker features (same as in prepare_features)
+        ranks = [rank_map.get(c[0], 2) for c in cards]
+        suits = [suit_map.get(c[1], 1) for c in cards]
+        
+        # Add poker-specific features
+        rank_counts = [ranks.count(r) for r in set(ranks)]
+        suit_counts = [suits.count(s) for s in set(suits)]
+        
+        # Feature engineering (same as training)
+        features.extend([
+            max(rank_counts),  # Highest pair/trips/quads
+            len([c for c in rank_counts if c >= 2]),  # Number of pairs
+            max(suit_counts),  # Flush potential
+            max(ranks),  # Highest card
+            min(ranks),  # Lowest card
+            len(set(ranks)),  # Number of unique ranks
+        ])
+        
+        # Add bias term
         X = np.hstack(([1], features))
+        
+        # Debug: Check dimensions
+        if len(X) != len(self.model):
+            st.error(f"❌ Feature mismatch! Expected {len(self.model)} features, got {len(X)}. Please retrain the model.")
+            st.info("Click 'Use Demo Dataset' or reload your dataset to retrain the model with correct features.")
+            return 0.5
+        
         pred = np.dot(X, self.model)
         return np.clip(pred, 0, 1)
 
@@ -225,23 +348,26 @@ if 'processor' not in st.session_state:
 if 'hands_analyzed' not in st.session_state:
     st.session_state.hands_analyzed = 0
     st.session_state.correct_predictions = 0
-    st.session_state.progress_history = []
 
-st.title("🃏 Poker AI Full Tutorial & Predictor")
+st.title("🃏 Poker AI Tutorial & Predictor")
 
 with st.sidebar:
-    uploaded_file = st.file_uploader("Upload Dataset (CSV)", type=['csv'])
+    uploaded_file = st.file_uploader("Upload Dataset (CSV/TXT)", type=['csv', 'txt'])
+    
     if uploaded_file and st.button("Load Dataset"):
         if st.session_state.processor.load_dataset(uploaded_file):
-            st.session_state.processor.train_model()
-            st.success(f"Dataset loaded and model trained! Accuracy: {st.session_state.processor.training_accuracy:.1%}")
+            if st.session_state.processor.train_model():
+                st.success(f"Dataset loaded and model trained! Accuracy: {st.session_state.processor.training_accuracy:.1%}")
+                st.info("✅ Model trained with correct features!")
+            else:
+                st.error("Failed to train model. Please check your dataset format.")
     if st.button("Use Demo Dataset"):
         st.session_state.processor.create_demo_dataset()
         st.session_state.processor.train_model()
         st.success(f"Demo dataset created and model trained! Accuracy: {st.session_state.processor.training_accuracy:.1%}")
+        st.info("✅ Model retrained with correct features!")
     st.metric("Hands Analyzed", st.session_state.hands_analyzed)
     accuracy = (st.session_state.correct_predictions / max(1, st.session_state.hands_analyzed)) * 100
-    st.metric("Tutorial Accuracy", f"{accuracy:.1f}%")
     
     # Model status indicator
     if st.session_state.processor.is_trained:
@@ -253,22 +379,18 @@ with st.sidebar:
     if st.button("🔄 Reset Progress"):
         st.session_state.hands_analyzed = 0
         st.session_state.correct_predictions = 0
-        st.session_state.progress_history = []
+        # Also reset the model to fix any feature mismatch issues
+        st.session_state.processor = RealPokerDataProcessor()
+        if 'result' in st.session_state:
+            del st.session_state.result
+        if 'quiz_hand' in st.session_state:
+            del st.session_state.quiz_hand
+        if 'practice_scenario' in st.session_state:
+            del st.session_state.practice_scenario
         st.rerun()
 
 if st.session_state.processor.dataset is not None:
-    tabs = st.tabs(["Analyzer", "Dataset", "Tutorial", "Practice", "Analytics"])
-else:
-    st.info("👈 **Get Started**: Use the sidebar to load a dataset or create a demo dataset to begin!")
-    st.write("**Available Features:**")
-    st.write("• 🎮 **Hand Analyzer**: Predict win probabilities using machine learning")
-    st.write("• 📊 **Dataset View**: Explore poker hand data and statistics") 
-    st.write("• 📚 **Tutorial**: Learn poker hand rankings and pot odds")
-    st.write("• 🎲 **Practice**: Test your skills with interactive scenarios")
-    st.write("• 📈 **Analytics**: Track your learning progress")
-
-if st.session_state.processor.dataset is not None:
-    tabs = st.tabs(["Analyzer", "Dataset", "Tutorial", "Practice", "Analytics"])
+    tabs = st.tabs(["Analyzer", "Dataset", "Tutorial", "Practice"])
 
     with tabs[0]:
         st.header("Analyze Poker Hand")
@@ -305,8 +427,7 @@ if st.session_state.processor.dataset is not None:
                     st.progress(win_prob, text=f"{win_prob:.1%}")
                     st.session_state.hands_analyzed += 1
 
-    with tabs[1]:
-        st.header("Dataset Overview")
+    with tabs[1]:  
         st.write(st.session_state.processor.dataset.head())
         st.write("Total Hands:", len(st.session_state.processor.dataset))
         if 'strength' in st.session_state.processor.dataset.columns:
@@ -359,6 +480,8 @@ if st.session_state.processor.dataset is not None:
                         st.session_state.correct_predictions += 1
                     else:
                         st.error(f"❌ Wrong. Correct answer: {correct_answer}")
+                    
+                    st.session_state.hands_analyzed += 1
                     
                     explanation = generate_explanation(st.session_state.quiz_answer, st.session_state.quiz_hand)
                     st.info(explanation)
@@ -444,16 +567,22 @@ if st.session_state.processor.dataset is not None:
                 correct_action = action_names[optimal_action]
                 action_correct = action_guess == correct_action
                 
+                # Update scoring
+                if hand_correct:
+                    st.session_state.correct_predictions += 1
+                if action_correct:
+                    st.session_state.correct_predictions += 1
+                
+                st.session_state.hands_analyzed += 1
+                
                 # Show results
                 if hand_correct:
                     st.success(f"✅ Hand: Correct! It's {correct_hand}")
-                    st.session_state.correct_predictions += 1
                 else:
                     st.error(f"❌ Hand: Wrong. It's {correct_hand}")
                 
                 if action_correct:
                     st.success(f"✅ Action: Correct! {correct_action} is optimal")
-                    st.session_state.correct_predictions += 1
                 else:
                     st.error(f"❌ Action: Suboptimal. Better choice: {correct_action}")
                 
@@ -463,55 +592,6 @@ if st.session_state.processor.dataset is not None:
                 
                 action_explanation = generate_action_explanation(optimal_action, hand_strength, pot_odds)
                 st.info(action_explanation)
-
-    with tabs[4]:
-        st.header("📊 Learning Analytics")
-        
-        if st.session_state.progress_history:
-            df = pd.DataFrame(st.session_state.progress_history)
-            
-            # Progress chart
-            fig = px.line(df, x='hand', y='strength', 
-                         title='Hand Strength Over Time',
-                         labels={'strength': 'Hand Strength', 'hand': 'Hand Number'})
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Hand type distribution
-            hand_counts = df['hand_type'].value_counts()
-            fig2 = px.bar(x=hand_counts.index, y=hand_counts.values,
-                         title='Hand Types Analyzed',
-                         labels={'x': 'Hand Type', 'y': 'Count'})
-            st.plotly_chart(fig2, use_container_width=True)
-            
-            # Summary stats
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("Total Hands", len(df))
-            
-            with col2:
-                avg_strength = df['strength'].mean()
-                st.metric("Avg Hand Strength", f"{avg_strength:.1%}")
-            
-            with col3:
-                accuracy = (st.session_state.correct_predictions / max(1, st.session_state.hands_analyzed)) * 100
-                st.metric("Quiz Accuracy", f"{accuracy:.1f}%")
-        
-        else:
-            st.info("📊 Analyze some hands to see your progress!")
-
-# Footer
-st.markdown("---")
-st.markdown("""
-**🎯 Features:**
-- Real-time hand analysis and classification with ML prediction
-- Interactive tutorial with hand rankings and pot odds calculator
-- Advanced practice mode with dual scoring (hand recognition + action prediction)
-- Progress tracking and learning analytics
-- Dataset upload and demo data generation
-
-*This poker AI combines machine learning with educational tools for comprehensive poker skill development.*
-""")
 
 
 
