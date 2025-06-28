@@ -4,7 +4,6 @@ This is a Streamlit app that predicts poker hand win probability using demo data
 
 Direct link on Streamlit:
 https://pokeraiapppy-uxlnvnjkbhleh5wobf2afn.streamlit.app/
-(Generate a demo dataset to run the program)
 
 ## Setup
 
